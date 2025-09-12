@@ -30,6 +30,9 @@
 💾 数据层 (Redis + MySQL)
 ```
 
+<img width="3840" height="2285" alt="Untitled diagram _ Mermaid Chart-2025-09-12-085904" src="https://github.com/user-attachments/assets/a6865b1f-a391-408c-b7e7-3f7d4812200d" />
+
+
 ### 🧩 核心模块详解
 
 #### 1. **外部系统层**
