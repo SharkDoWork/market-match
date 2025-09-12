@@ -1,0 +1,132 @@
+app:
+  profile: "go-local"
+  name: "match-engine" # ENV APP_NAME
+  seq: 0  # ENV CAPTAIN_SEQ
+
+rabbitmq:
+  address:
+    - "192.168.10.115:5672"
+    - "192.168.10.115:5672"
+    - "192.168.10.115:5672"
+  virtual-host: ""
+  username: "qhxcpre"
+  password: "qhxcpre@123"
+  conn-num: 10
+  conn-timeout-ms: 3000
+  n-retry: 30
+  ts-bumper-interval-ms: 3000
+  exchange:
+    market: "ts-bumper"
+    #market: "market.quotation"
+    trade-detail: "exchange.matchresults"
+    quotation: "l2quote"
+  max-delay-s: 60
+  compressed: false
+
+batch_result: 90
+
+snapshot:
+  dir: "/Users/recv/go/src/match-engine/log/"
+  ends-with: "-snapshot-go"
+  n-history: 10
+  min-gap: 10000
+
+scheduler:
+  snapshot: [0, 60000]  #15分钟
+  orderbook-report: [0, 1500000]
+
+redis:
+  address:
+    - "192.168.10.113:7002"
+    - "192.168.10.113:7000"
+    - "192.168.10.113:7001"
+    - "192.168.10.113:7003"
+    - "192.168.10.113:7004"
+    - "192.168.10.113:7005"
+  password: ""
+  db: "0"
+log:
+  level: info # support trace debug info warn
+
+exchange:
+  l2quote:
+    size: 1800
+  trade:
+    size: 5000
+  depth:
+    size: 1000
+
+mrredis:
+  check-result: true
+
+symbols:
+  - BTC_USDT
+  #- ETH_USDT
+
+market:
+  freq-depth-update-interval-ms: 30
+  min-depth-update-interval-ms: 100
+  min-stacked-depth-update-interval-ms: 1000
+  default-update-interval-ms: 1000
+
+symbol-info:
+  default:
+    amount-scale: 18
+    price-scale: 18
+    l2quote-price-scale: 2
+    depth-10percent-capacity: 200
+    depth-steps:
+      "0": [0.000000000000000001, 150]
+      "1": [0.00001, 150]
+      "2": [0.0001, 150]
+      "3": [0.001, 150]
+      "4": [0.01, 150]
+      "5": [0.1, 150]
+      "6": [0.000000000000000001, 20]
+      "7": [0.00001, 20]
+      "8": [0.0001, 20]
+      "9": [0.001, 20]
+      "10": [0.01, 20]
+      "11": [0.1, 20]
+    uncombined-depth-steps:
+      "150.high_freq": [0.000000000000000001, 150]
+      "20.high_freq":  [0.000000000000000001,  20]
+
+mysql:
+  endpoint: "192.168.10.119:3306"
+  user: "qhxc"
+  password: "qhxcpre1025"
+  db: "exchange"
+  conn-num: 20
+  pull-gap: 50 # min milliseconds between pull from mysql
+
+persistence:
+  endpoint: "192.168.10.119:3306"
+  user: "qhxc"
+  password: "qhxcpre1025"
+  db: "exchange"
+  conn-num: 32
+  batch-size: 30
+
+aws:
+  credential:
+    access-key: ""
+    secret-key: ""
+  s3:
+    enable: false
+    bucket: "t"
+    region: "a"
+    upload-timeout-second: 120 # second
+
+l2quote:
+    mq-send-interval-ms: 500
+    kline-forward-limit: 21600
+    make-new-kline-at-sec : 2
+    snapshot:
+      n-history: 10
+      path: "/Users/recv/go/src/match-engine/log"
+
+location: "Asia/Shanghai"
+
+
+
