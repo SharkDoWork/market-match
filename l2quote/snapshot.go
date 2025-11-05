@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"io/ioutil"
 	"market-match/common"
 	"market-match/config"
 	"market-match/snapshotter"
+
+	"github.com/shopspring/decimal"
 
 	"os"
 	"path"
@@ -491,7 +492,7 @@ func (L *L2quote) buildL2quoteSnapshotPath(id int64) string {
 
 }
 
-//获取最后一个快照信息
+// 获取最后一个快照信息
 func (L *L2quote) getLastSnapshot() (q Quotation, err error) {
 
 	latestSnapshotName, err := getLatestSnapshotName(L.snapshotPath, L.symbol)

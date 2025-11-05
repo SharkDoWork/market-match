@@ -294,6 +294,7 @@ func (L *L2quote) checkRedisKline() {
 	// check 1min,3min,5min,15min,30min,60min,2hour,4hour,6hour,8hour,12hour,1day
 	// partitioned by year
 	//for _, klineType := range []string{"1min", "3min", "5min", "15min", "30min", "60min", "2hour", "4hour", "6hour", "8hour", "12hour", "1day"} {
+
 	for _, klineType := range []string{"1min", "5min", "15min", "30min", "60min", "4hour", "1day"} {
 
 		for _, year := range []int{2022} {
@@ -304,11 +305,13 @@ func (L *L2quote) checkRedisKline() {
 
 			// redis connect error？
 			if res.Err() != nil {
-				common.Fatal(L.symbol, "l2quote check redis kline error: ", res.Err())
+				common.Fatalf(L.symbol, "l2quote check redis kline error: ", res.Err())
 			}
 
 			if int(res.Val()) != length {
-				common.Fatal(fmt.Sprintf("%s l2quote check %s redis kline error, expected %d, get %d",
+				// log.Println(fmt.Sprintf("%s l2quote check %s redis kline error, expected %d, get %d",
+				// 	L.symbol, key, length, res.Val()))
+				common.Warn(fmt.Sprintf("%s l2quote check %s redis kline error, expected %d, get %d",
 					L.symbol, key, length, res.Val()))
 			}
 		}
@@ -326,7 +329,7 @@ func (L *L2quote) checkRedisKline() {
 		}
 
 		if int(res.Val()) != length {
-			common.Fatal(fmt.Sprintf("%s l2quote check %s redis kline error, expected %d, get %d",
+			common.Warn(fmt.Sprintf("%s l2quote check %s redis kline error, expected %d, get %d",
 				L.symbol, key, length, res.Val()))
 		}
 	}

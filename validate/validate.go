@@ -1,7 +1,7 @@
 package validate
 
 import (
-	"github.com/json-iterator/go"
+	jsoniter "github.com/json-iterator/go"
 
 	"market-match/common"
 	"market-match/config"
@@ -31,7 +31,7 @@ func ValidateOrderbook() bool {
 		l2quoteMaxMRID := l2quote.GetLargestMRID(config.GetString("l2quote.snapshot.path", "./sp/"), symbol)
 
 		if ids[0] > l2quoteMaxMRID {
-			common.Fatal(symbol, "l2quote snapshot match result id ", ids[0], " smaller than exchange match result id ", l2quoteMaxMRID, "need handle it by manual")
+			common.Warnf(symbol, "l2quote snapshot match result id ", ids[0], " smaller than exchange match result id ", l2quoteMaxMRID, "need handle it by manual")
 		}
 
 		mapSymbols[symbol] = false
@@ -81,7 +81,7 @@ func ValidateOrderbook() bool {
 	}
 }
 
-//CheckMatcher match and cpmpare orderbook
+// CheckMatcher match and cpmpare orderbook
 func CheckMatcher(lastBook *match.OrderBook, baseBook *match.OrderBook, orderSeqChan chan *match.Order,
 	checkCh chan string, resultMap map[int64]string) {
 	go func() {

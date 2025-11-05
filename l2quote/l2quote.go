@@ -3,7 +3,6 @@ package l2quote
 import (
 	"context"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"market-match/common"
 	"market-match/dogstatsd"
 	"market-match/match"
@@ -11,9 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/emirpasic/gods/maps/treemap"
 	"github.com/go-redis/redis/v8"
-	"github.com/json-iterator/go"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/cast"
 )
 

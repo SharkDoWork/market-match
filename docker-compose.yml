@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: market-match-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: aibit
+    ports:
+      - "3306:3306"
+    command: ["--default-authentication-plugin=mysql_native_password", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: market-match-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+
+  redis-init:
+    image: redis:7.2-alpine
+    container_name: market-match-redis-init
+    depends_on:
+      - redis
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SYMBOLS_CSV: "ETH_USDT,BTC_USDT"
+      BASE_TS: 1640966400
+    volumes:
+      - ./red.sh:/red.sh:ro
+    entrypoint: ["sh", "/red.sh"]
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: market-match-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  app:
+    build: .
+    container_name: market-match-app
+    depends_on:
+      - mysql
+      - redis
+      - redis-init
+      - rabbitmq
+    environment:
+      CONFIG_FILE: /app/conf/dev.yaml
+      CAPTAIN_SEQ: 0
+    volumes:
+      - ./logs:/app/logs
+      - ./sp:/app/sp
+      - ./conf/dev.yaml:/app/conf/dev.yaml:ro
+    ports:
+      - "9000:9000"
+

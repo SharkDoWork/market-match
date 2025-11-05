@@ -6,10 +6,11 @@ app:
 rabbitmq:
   protocol: "amqp"
   address:
-    - "10.0.1.18:5672"
+    # - "10.0.1.18:5672"
+    - "127.0.0.1:5672"
   virtual-host: "/"
-  username: "admin"
-  password: "admin123"
+  username: "guest"
+  password: "guest"
   conn-num: 10
   conn-timeout-ms: 3000
   n-retry: 30
@@ -35,13 +36,14 @@ scheduler:
 
 redis:
   address:
-    - "10.0.1.19:6001"
-    - "10.0.1.19:6002"
-    - "10.0.1.19:6003"
-    - "10.0.1.19:6004"
-    - "10.0.1.19:6005"
-    - "10.0.1.19:6006"
-  password: "123456"
+    - "127.0.0.1:6379"
+    # - "10.0.1.19:6001"
+    # - "10.0.1.19:6002"
+    # - "10.0.1.19:6003"
+    # - "10.0.1.19:6004"
+    # - "10.0.1.19:6005"
+    # - "10.0.1.19:6006"
+  password: ""
   db: "0"
 log:
   debug: false
@@ -98,17 +100,21 @@ symbol-info:
       "20.high_freq":  [0.000000000000000001,  20]
 
 mysql:
-  endpoint: "rm-dj14xr02c8i1slb53.mysql.rds.aliyuncs.com:3306"
+  # endpoint: "rm-dj14xr02c8i1slb53.mysql.rds.aliyuncs.com:3306"
+  endpoint: "localhost:3306"
   user: "aibit"
-  password: "uiuKDD_76@v*UbyP"
+  # password: "uiuKDD_76@v*UbyP"
+  password: "123456"
   db: "aibit"
   conn-num: 20
   pull-gap: 50 # min milliseconds between pull from mysql
 
 persistence:
-  endpoint: "rm-dj14xr02c8i1slb53.mysql.rds.aliyuncs.com:3306"
+  # endpoint: "rm-dj14xr02c8i1slb53.mysql.rds.aliyuncs.com:3306"
+  endpoint: "localhost:3306"
   user: "aibit"
-  password: "uiuKDD_76@v*UbyP"
+  # password: "uiuKDD_76@v*UbyP"
+  password: "123456"
   db: "aibit"
   conn-num: 32
   batch-size: 30

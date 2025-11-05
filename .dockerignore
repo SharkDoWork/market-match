@@ -1,0 +1,13 @@
+.git
+.gitignore
+logs
+sp
+data
+node_modules
+*.log
+*.out
+*.tmp
+*.swp
+vendor
+.DS_Store
+

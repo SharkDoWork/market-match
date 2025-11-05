@@ -3,11 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/shopspring/decimal"
-	"github.com/spf13/cast"
 	"io"
 	"market-match/common"
 	"market-match/config"
+	"market-match/dogstatsd"
 	"market-match/l2quote"
 	"market-match/market"
 	"market-match/match"
@@ -22,6 +21,10 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+
+	"github.com/DataDog/datadog-go/statsd"
+	"github.com/shopspring/decimal"
+	"github.com/spf13/cast"
 
 	"strconv"
 	"time"
@@ -65,7 +68,7 @@ func preStart(port int) {
 
 func catch() {
 	if e := recover(); e != nil {
-		//dogstatsd.Event("service crashed", fmt.Sprintf("service crashed Panicing %s", e), statsd.Error)
+		dogstatsd.Event("service crashed", fmt.Sprintf("service crashed Panicing %s", e), statsd.Error)
 		common.Error("server exit :", e, string(debug.Stack()))
 		os.Exit(common.ErrnoSystemError)
 	}
@@ -98,8 +101,6 @@ func main() {
 	common.WriteStartOk()
 	common.Info("exchange started")
 
-	//dogstatsd.Event("service started", "service started", statsd.Success)
-
 	for {
 		time.Sleep(100 * time.Second)
 	}
@@ -119,6 +120,7 @@ func marketInit() {
 	}
 }
 
+// TODO: 排查下为什么报错了
 func startExchange() {
 	for _, symbol := range config.GetStringSlice("symbols", []string{}) {
 		perch := make(chan []byte, 10000)
@@ -127,6 +129,8 @@ func startExchange() {
 		ch := make(chan *match.Order, 5000)
 		mrCh := make(chan []byte, 5000)
 		exchangeName := config.GetString("app.profile", "market") + "." + config.GetString("rabbitmq.exchange.quotation", "l2quote")
+
+		// log.Println("l2quote.snapshot.path:", config.GetString("l2quote.snapshot.path", "./sp/"))
 		l2 := l2quote.NewL2quote(symbol, redis.KlineClient, mrCh, config.GetString("l2quote.snapshot.path", "./sp/"),
 			exchangeName, config.GetInt64("l2quote.mq-send-interval-ms", 500),
 			config.GetInt64("l2quote.kline-forward-limit", 1440),

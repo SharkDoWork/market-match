@@ -4,13 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/viper"
+	"log"
 	"market-match/common"
 	"market-match/config"
 	"market-match/match"
 	"market-match/statistics"
 	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/cast"
@@ -69,6 +71,8 @@ func (p *Persisten) initPersistenceInfo() {
 		"f_id >=? AND f_id <=? ", p.symbol)
 	p.selectStmt, err = p.DB.Prepare(p.selectPrepare)
 	if err != nil {
+		log.Println("select prepare error", err, DataSourceName)
+
 		common.Fatal("select prepare error:", err)
 	}
 
