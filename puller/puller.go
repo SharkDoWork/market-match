@@ -1,3 +1,9 @@
+// Package puller 负责从 MySQL 订单序列表中持续拉取订单，并按序推送给撮合引擎。
+//
+// 交易所的订单（下单/撤单等）先由上游服务按全局递增 id 写入订单序列表
+// （每个交易对一张表，表名形如 aibit_spot_sequence_<symbol>），
+// puller 以"自增 id 游标"的方式轮询该表，保证订单按 SeqId 严格有序地进入撮合引擎，
+// 这是撮合结果确定性的前提。重启时从快照位点 lastId+1 继续拉取，做到不重不漏。
 package puller
 
 import (
@@ -20,40 +26,46 @@ var (
 	DBSymbol map[string]*sql.DB
 	//dbStmt         *sql.Stmt
 	dbSymbolsStmt  map[string]*sql.Stmt
-	pullerInterval time.Duration
+	pullerInterval time.Duration // 无新订单时的基础轮询间隔
 )
 
+// 订单序列表中 type 字段的整型编码，对应撮合引擎内部的订单方向与类型组合
 const (
-	submitCancel      int32 = 0
-	buyMarket         int32 = 1
-	sellMarket        int32 = 2
-	buyLimit          int32 = 3
-	sellLimit         int32 = 4
-	buyIoc            int32 = 5
-	sellIoc           int32 = 6
-	buyFok            int32 = 7
-	sellFok           int32 = 8
-	buyLimitMaker     int32 = 9
-	sellLimitMaker    int32 = 10
-	batchCancel       int32 = 13
-	continuousAuction int32 = 22
-	earlySettlement   int32 = 23
-	settlement        int32 = 24
-	delivery          int32 = 25
+	submitCancel      int32 = 0  // 撤销单（单个撤单）
+	buyMarket         int32 = 1  // 买-市价单
+	sellMarket        int32 = 2  // 卖-市价单
+	buyLimit          int32 = 3  // 买-限价单
+	sellLimit         int32 = 4  // 卖-限价单
+	buyIoc            int32 = 5  // 买-IOC（立即成交剩余撤销）
+	sellIoc           int32 = 6  // 卖-IOC
+	buyFok            int32 = 7  // 买-FOK（全部成交否则撤销）
+	sellFok           int32 = 8  // 卖-FOK
+	buyLimitMaker     int32 = 9  // 买-只做 Maker 限价单
+	sellLimitMaker    int32 = 10 // 卖-只做 Maker 限价单
+	batchCancel       int32 = 13 // 批量撤单
+	continuousAuction int32 = 22 // 连续竞价
+	earlySettlement   int32 = 23 // 提前交割/结算
+	settlement        int32 = 24 // 交割结算
+	delivery          int32 = 25 // 交割
 )
 
+// DbInfoList 按 symbol 索引各交易对的数据库拉取实例
 var DbInfoList = make(map[string]*DbInfo)
 
+// DbInfo 封装单个交易对的 MySQL 连接、预编译查询语句及拉取参数
 type DbInfo struct {
-	DataSourceName string
-	symbol         string
-	Prepare        string
-	DB             *sql.DB
-	dbStmt         *sql.Stmt
-	pullerInterval time.Duration
-	ch             chan *match.Order
+	DataSourceName string        // MySQL DSN 连接串
+	symbol         string        // 交易对
+	Prepare        string        // 拉取订单的 SQL 语句
+	DB             *sql.DB       // 数据库连接池
+	dbStmt         *sql.Stmt     // 预编译的拉单语句
+	pullerInterval time.Duration // 无新订单时的轮询间隔
+	ch             chan *match.Order // 订单输出通道（下游为撮合协程）
 }
 
+// Init 初始化指定交易对的订单拉取器：建立 MySQL 连接、预编译拉单 SQL，
+// 启动后台拉单协程（从 fromId 开始），并加载该交易对的精度配置。
+// fromId 通常为最近快照位点 lastId+1，保证重启后不重不漏。
 func Init(ch chan *match.Order, symbol string, fromId int64) {
 	db := &DbInfo{
 		symbol: symbol,
@@ -66,6 +78,9 @@ func Init(ch chan *match.Order, symbol string, fromId int64) {
 	db.InitSymbolConf()
 }
 
+// getPrepare 构造按 id 游标批量拉取订单的 SQL：从该 symbol 的订单序列表中
+// 取 id >= ? 的最多 2000 条记录，按 id 升序返回。
+//
 //todo  可以根据配置文件生成语句
 func getPrepare(symbol string) string {
 	return "SELECT id        as id, " +
@@ -85,6 +100,8 @@ func getPrepare(symbol string) string {
 
 }
 
+// initDbInfo 根据配置（mysql.user/password/endpoint/db）建立 MySQL 连接池，
+// 并预编译该 symbol 的拉单 SQL。连接数上限由 mysql.conn-num 控制（默认 10）。
 func (d *DbInfo) initDbInfo(symbol string) {
 	d.DataSourceName = fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8",
 		config.GetString("mysql.user", ""),
@@ -108,6 +125,7 @@ func (d *DbInfo) initDbInfo(symbol string) {
 	}
 }
 
+// GetMinIdFromDb 查询订单序列表中的最小订单 id（用于校验起始拉取位点的合法性）。
 func GetMinIdFromDb() int64 {
 	var Id int64
 	DB.QueryRow("select min(f_id) from" +
@@ -115,6 +133,7 @@ func GetMinIdFromDb() int64 {
 	return Id
 }
 
+// ExistSymbolInDb 判断指定交易对在订单序列表中是否存在记录。
 func ExistSymbolInDb(symbol string) bool {
 
 	query := "select 1 from " + fmt.Sprintf("t_order_sequence_%s", symbol) + "  where f_symbol = '" + symbol + "' limit 1;"
@@ -128,6 +147,13 @@ func ExistSymbolInDb(symbol string) bool {
 	return true
 }
 
+// GoPuller 启动后台协程，以 fromId 为游标持续轮询数据库拉取订单并写入 ch。
+//
+// 拉取策略：
+//   - 每轮拉到订单时，游标前进到最后一条订单 SeqId+1，立即继续下一轮；
+//   - 没有新订单时先按 pullerInterval 短间隔轮询；
+//   - 连续约 50 轮无新订单且游标未推进（已追上最新），退化为 1 秒长轮询，降低数据库压力。
+//
 // 异步去取订单
 func (d *DbInfo) GoPuller(ch chan *match.Order, fromId int64) {
 	longSleep := 0
@@ -140,6 +166,7 @@ func (d *DbInfo) GoPuller(ch chan *match.Order, fromId int64) {
 			orders := d.pullOrder(fromId)
 			orderNum := len(orders)
 			for i := range orders {
+				// 记录拉取时间点，用于全链路耗时统计
 				statistics.SetPullTag(orders[i].SeqId)
 				fmt.Println("order , ", orders[i])
 				ch <- orders[i]
@@ -166,11 +193,16 @@ func (d *DbInfo) GoPuller(ch chan *match.Order, fromId int64) {
 	return
 }
 
+// pullOrder 拉取 fromId 之后的一批订单（当前实现直接转发给 getOrdersFromDb）。
 func (d *DbInfo) pullOrder(fromId int64) (orders []*match.Order) {
 	orders = d.getOrdersFromDb(fromId)
 	return
 }
 
+// getOrdersFromDb 执行预编译 SQL，把数据库行扫描为 match.Order 对象，
+// 并将整型订单类型编码转换为撮合引擎内部的（方向, 类型）枚举。
+// 同一批订单共用相同的 PullTime（毫秒时间戳），用于耗时统计。
+//
 // sql 一次取1000
 func (d *DbInfo) getOrdersFromDb(fromId int64) (orders []*match.Order) {
 	results, err := d.dbStmt.Query(fromId)
@@ -209,6 +241,9 @@ func (d *DbInfo) getOrdersFromDb(fromId int64) (orders []*match.Order) {
 	return
 }
 
+// setOrderType 将数据库中的整型订单类型编码映射为撮合引擎内部的
+// (BuyOrSell 方向, Type 类型) 枚举组合；随后校验订单的数量/价格精度，
+// 精度不合法的订单被标记为 SystemCancel（系统撤销），不再参与正常撮合。
 func setOrderType(symbol string, order *match.Order, orderIntType int32) {
 	switch orderIntType {
 	case submitCancel:
@@ -252,6 +287,9 @@ func setOrderType(symbol string, order *match.Order, orderIntType int32) {
 	return
 }
 
+// InitSymbolConf 从交易对配置表（aibit_coin_pair_config）读取该 symbol 的价格精度
+// （price_scale），并注册到全局配置中供撮合/行情模块使用；精度非法时直接 panic。
+//
 // 初始化币对深度
 func (d *DbInfo) InitSymbolConf() {
 	var scale int

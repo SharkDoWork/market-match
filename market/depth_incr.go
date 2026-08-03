@@ -10,9 +10,12 @@ import (
 )
 
 var (
-	MarketDefaultUpdateIntervalMs int64 = 1000
+	MarketDefaultUpdateIntervalMs int64 = 1000 // 深度数据默认更新间隔（毫秒）
 )
 
+// BuildAndReportDepthUncombinded 生成不聚合的原始深度数据（Uncombined Depth）并上报。
+// 与 BuildAndReportDepth 不同，本函数不对价格做步长聚合，每个订单的价格独立成档，
+// 适用于需要精确到每一笔挂单价格的场景。
 func BuildAndReportDepthUncombinded(book *match.OrderBook) {
 
 	ts00 := time.Now().UnixNano()
@@ -38,7 +41,8 @@ func BuildAndReportDepthUncombinded(book *match.OrderBook) {
 	}
 }
 
-//将生成的过程拆出来，方便做单测
+// buildDepthUncombinded 从订单簿中取出全部买卖订单，按配置的多个步长分别生成不聚合的深度数据。
+// 将生成的过程拆出来，方便做单测
 func buildDepthUncombinded(book *match.OrderBook) []*QuoteDepths {
 
 	// buyOrders, sellOrders := takeOrdersFromBookLimit(book, viper.GetInt64("exchange.l2quote.size"))
@@ -71,6 +75,8 @@ func buildDepthUncombinded(book *match.OrderBook) []*QuoteDepths {
 	return depthList
 }
 
+// buildDepthStepForUncombinded 按指定步长生成不聚合的深度数据。
+// 注意：虽然传入 step 参数，但实际取整函数不做任何舍入，每个订单价格独立成档。
 func buildDepthStepForUncombinded(index int,
 	depthStep common.DepthStep,
 	stepCount int,
@@ -114,12 +120,17 @@ func buildDepthStepForUncombinded(index int,
 
 }
 
+// takeOrdersFromBookForUncombinded 从订单簿中取出买卖两侧的全部订单。
+// 与 takeOrdersFromBookLimit 不同，本函数不限制条数，取出整个盘口。
 func takeOrdersFromBookForUncombinded(book *match.OrderBook) (buyOrders []*match.Order, sellOrders []*match.Order) {
 	buyOrders = book.Take(match.Buy, int64(book.BuySet.Size()))
 	sellOrders = book.Take(match.Sell, int64(book.SellSet.Size()))
 	return
 }
 
+// orderDepthForUncombinded 将订单列表聚合成不聚合的深度档位。
+// 与 orderDepth 的区别在于：取整函数不做任何舍入，每个订单价格独立成档，
+// 因此相同价格的订单才会合并到同一档位。
 func orderDepthForUncombinded(orders []*match.Order, step float64, capacity int64, isSell bool) (depths [][2]decimal.Decimal) {
 
 	var tsRound int64 = 0
@@ -159,10 +170,12 @@ func orderDepthForUncombinded(orders []*match.Order, step float64, capacity int6
 	return
 }
 
+// roundUpForUncombinded 不聚合场景下的"向上取整"，实际直接返回原价格。
 func roundUpForUncombinded(d decimal.Decimal, step float64) decimal.Decimal {
 	return d
 }
 
+// roundDownForUncombinded 不聚合场景下的"向下取整"，实际直接返回原价格。
 func roundDownForUncombinded(d decimal.Decimal, step float64) decimal.Decimal {
 	return d
 }

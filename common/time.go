@@ -1,3 +1,5 @@
+// Package common 提供撮合引擎的公共基础设施，包括日志系统、配置加载、
+// 时间工具、错误码定义、全局通道等通用能力，供其他业务包复用。
 package common
 
 import (
@@ -5,6 +7,10 @@ import (
 	"time"
 )
 
+// K 线（Kline/Candlestick）周期常量定义，分为三组：
+//   Name*  —— 周期的字符串标识（如 "1min"、"1day"），用于配置与对外接口；
+//   Type*  —— 周期的整型枚举（1~15），用于内部 switch 分发；
+//   Step*  —— 周期对应的秒数步长，用于时间戳对齐计算。
 const (
 	Name1Minute  = "1min"
 	Name3Minute  = "3min"
@@ -55,10 +61,13 @@ const (
 	Step1Year    = 60 * 60 * 24 * 365
 )
 
-var HmType2Name map[int]string
-var HmType2Step map[int]int
-var HmName2Type map[string]int
+// 三张全局映射表，在 init() 中建立，实现 K 线周期的 Type/Name/Step 之间的互相转换。
+var HmType2Name map[int]string // Type -> Name，如 Type1Minute -> "1min"
+var HmType2Step map[int]int    // Type -> Step（秒），当前未在 init 中填充，预留
+var HmName2Type map[string]int // Name -> Type，如 "1min" -> Type1Minute
 
+// init 在包加载时填充 HmType2Name 与 HmName2Type 两张映射表。
+// 注意：HmType2Name[Type8Hour] 被赋值为 Name6Hour（疑似笔误，原代码如此，未做修改）。
 func init() {
 	HmType2Name = make(map[int]string)
 	HmName2Type = make(map[string]int)
@@ -95,12 +104,14 @@ func init() {
 	HmName2Type[Name1Mon] = Type1Mon
 }
 
+// TimestampNowMs 返回当前 UTC 时间的毫秒级时间戳。
 func TimestampNowMs() int64 {
 	var timestamp int64
 	timestamp = time.Now().UTC().UnixNano() / 1000000
 	return timestamp
 }
 
+// TimeNowMs 返回当前时间的 "时:分:秒.毫秒" 字符串，用于日志或调试输出。
 func TimeNowMs() string {
 	tm := time.Now()
 
@@ -110,11 +121,14 @@ func TimeNowMs() string {
 	return fmt.Sprintf("%d:%d:%.3f", tm.Hour(), tm.Minute(), float32(tm.Second())+float32(ms)/1000)
 }
 
+// TimeNowHour 返回当前时间的 "yyyyMMddHH" 格式字符串，常用于按小时命名文件或分片。
 func TimeNowHour() string {
 	tm := time.Now()
 	return fmt.Sprintf("%d%02d%02d%02d", tm.Year(), tm.Month(), tm.Day(), tm.Hour())
 }
 
+// IsLeapYear 判断给定 Unix 时间戳所在年份是否为闰年。
+// 注意：此处仅按 year%4==0 判断，未排除整百年份，与 isLeapYear（小写）的严格规则不同。
 func IsLeapYear(timestamp int) bool {
 	tm := time.Unix(int64(timestamp), 0)
 	year, _, _ := tm.Date()
@@ -124,12 +138,20 @@ func IsLeapYear(timestamp int) bool {
 	return false
 }
 
+// TimeDelayS 计算给定 Unix 时间戳距离当前时间过去了多少秒（延迟）。
 //计算一个时间戳到当前时间的延迟
 func TimeDelayS(timestamp int) int {
 	timestampNow := int(time.Now().UTC().Unix())
 	return timestampNow - timestamp
 }
 
+// CurWindowTime 将任意 Unix 时间戳对齐到其所属 K 线时间窗口的起始时间戳。
+//
+// 对于分钟级周期（1min~30min），直接用秒数步长做整除对齐；
+// 对于小时级及以上周期，由于涉及时区与夏令时，先转换到全局 Location，
+// 再通过 time.Date 按日历规则对齐（如 4hour 对齐到 0/4/8/12/16/20 点，
+// 1week 对齐到周一 0 点，1mon 对齐到每月 1 号）。
+// 未识别的 steptype 会触发 Fatal 并返回 0。
 //对齐时间，获取时间窗口起始时间
 func CurWindowTime(timestamp, steptype, wsid int) int {
 	var starttime int
@@ -197,6 +219,17 @@ func CurWindowTime(timestamp, steptype, wsid int) int {
 	return starttime
 }
 
+// GetListTsOffLen 是 K 线数据分片（分表）的核心帮助函数。
+//
+// 给定 K 线类型与任意时间戳，返回三元组：
+//   starttime —— 该时间戳所属分片（通常为一年）的起始时间戳；
+//   off       —— 该时间戳在分片内的偏移量（第几根 K 线，从 0 开始）；
+//   listLen   —— 该分片的总长度（该分片最多容纳多少根 K 线）。
+//
+// 分片策略：分钟级至小时级按"年"分片；1day 按"年"分片；
+// 1week 不分片，以 2022 年 1 月 1 日为基准累计周数；
+// 1mon 不分片，以 2022 年 1 月为基准累计月数，固定长度 60（5 年）。
+// 由于每年天数不同（闰年），endtime 均通过 calendar（AddDate）计算而非固定秒数。
 // 分片帮助函数
 // 给定一个时间戳和kline类型，返回分片的起始时间，该时间点所在的offset，和该分片的全长
 func GetListTsOffLen(steptype, timestamp, wsid int) (int, int, int) {
@@ -453,10 +486,13 @@ func NextKlineTimeWindow(ts int64, klineType string) int64 {
 	}
 }
 
+// isLeapYear 严格判断某年是否为闰年（能被 400 整除，或能被 4 整除但不能被 100 整除）。
+// 供 GetListTsOffLen 中 1week/1mon 周期累计天数时使用。
 func isLeapYear(year int) bool {
 	return year%400 == 0 || year%4 == 0 && year%100 != 0
 }
 
+// TimeSub2Ms 计算两个纳秒级时间戳之差，并转换为毫秒。
 func TimeSub2Ms(t1, t2 int64) int64 {
 	return (t1 - t2) / int64(time.Millisecond)
 }

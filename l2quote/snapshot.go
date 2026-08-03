@@ -1,3 +1,13 @@
+// Package l2quote 本文件实现行情状态的快照（snapshot）保存与恢复。
+// 快照的意义：内存中的 K 线 treemap 会随时间不断增长，全量保存代价高；
+// 而实际上重启恢复时只需要"最新撮合结果所在窗口 + 上一窗口"的少量 K 线，
+// 配合 24h 的 1 分钟桶数组，即可重建一致状态，旧窗口的历史 K 线由 Redis 提供。
+// 快照内容（SnapShots）：
+//   - 每种周期最新两根 K 线
+//   - 24h 的 1 分钟桶数组（Market）
+//   - 最大撮合结果 ID 与时间戳（MaxMRId/MaxMRTS），用于启动时去重与续传
+// 快照写入采用"先写临时文件再 rename"的方式保证原子性，避免半截文件；
+// 写入后异步上传 S3 做异地备份，并按配置清理过旧的本地快照。
 package l2quote
 
 import (
@@ -24,6 +34,10 @@ import (
 	"github.com/emirpasic/gods/utils"
 )
 
+// SnapShots 快照文件的序列化结构。
+// Klines 每种周期保存最新两根 K 线（[0] 为当前窗口，[1] 为上一窗口）；
+// Market 为 24h*60 个 1 分钟桶；MaxMRId/MaxMRTS 记录快照时刻的撮合进度；
+// LastSPTS 为上次快照时间；StartTime 为本次快照生成时间。
 type SnapShots struct {
 	Klines    map[string][]kline `json:"klines"`
 	Market    []kline            `json:"market"`
@@ -211,6 +225,9 @@ func (L *L2quote) takeSnapShot() {
 // 	go L.UploadToS3(snapshotsFileName)
 // }
 
+// checkSnapShot 在从快照恢复后做一致性校验：
+// 确认内存中确实存在"当前窗口与上一窗口"的 K 线，
+// 若关键窗口缺失说明快照可能损坏，直接 fatal 退出以便人工介入（避免带病运行）。
 // 如果快照破坏，需要在启动时验证，可能需要删除相应的快照
 func (L *L2quote) checkSnapShot() {
 
@@ -411,9 +428,9 @@ func (L *L2quote) genSnapshotPath() string {
 		"l2quote.snapshot."+L.symbol+"."+time.Now().Format("20060102150405"))
 }
 
-/*
-获取最新快照中的match result id
-*/
+// GetLargestMRID 读取指定交易对最新快照，返回其中记录的最大撮合结果 ID。
+// 供外部（如主程序）在启动时查询各交易对的恢复进度，决定从哪条撮合结果开始重放。
+// 没有快照时返回 0（从头开始）。
 func GetLargestMRID(snapshotPath string, symbol string) int64 {
 	latestSnapshotName, err := getLatestSnapshotName(snapshotPath, symbol)
 	if err != nil {
@@ -492,6 +509,8 @@ func (L *L2quote) buildL2quoteSnapshotPath(id int64) string {
 
 }
 
+// getLastSnapshot 读取最新快照并解析为 Quotation 结构返回（只读，不修改当前实例状态）。
+// 与 recoverFromSnapshot 的区别：本函数用于外部查询快照内容，恢复失败只返回错误而不 fatal。
 // 获取最后一个快照信息
 func (L *L2quote) getLastSnapshot() (q Quotation, err error) {
 

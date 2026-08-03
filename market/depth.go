@@ -12,24 +12,30 @@ import (
 
 var ()
 
+// Depth 表示一个价格档位上的深度数据。
+// PriceAmount[0] 为价格，PriceAmount[1] 为该价格对应的挂单总量。
 type Depth struct {
 	PriceAmount [2]decimal.Decimal //[0]:Price [1]:Amount
 }
 
+// QuoteDepths 是上报给行情服务的深度数据结构。
+// Bids 为买方盘口各价位挂单量（价格从高到低），Asks 为卖方盘口各价位挂单量（价格从低到高）。
+// 每个价位用 [2]decimal.Decimal 表示：[0] 价格，[1] 该价位的挂单总量。
 type QuoteDepths struct {
-	SeqId    int64                `json:"seqId"`
-	ID       int64                `json:"id"`
-	Bids     [][2]decimal.Decimal `json:"bids,omitempty"`
-	Asks     [][2]decimal.Decimal `json:"asks,omitempty"`
-	Ts       int64                `json:"ts"`
-	Version  int64                `json:"version"`
-	Type     string               `json:"type"`
-	PairCode string               `json:"pairCode"`
-	Interval string               `json:"interval,omitempty"`
-	ch       string
+	SeqId    int64                `json:"seqId"`    // 订单簿当前处理到的撮合序号，用于客户端去重/排序
+	ID       int64                `json:"id"`       // 深度数据 ID，通常与 Version 相同
+	Bids     [][2]decimal.Decimal `json:"bids,omitempty"` // 买方深度，[价格, 挂单量]
+	Asks     [][2]decimal.Decimal `json:"asks,omitempty"` // 卖方深度，[价格, 挂单量]
+	Ts       int64                `json:"ts"`       // 深度数据生成时间戳（毫秒）
+	Version  int64                `json:"version"`  // 版本号，按固定间隔递增
+	Type     string               `json:"type"`     // 数据类型，如 "market.orderBook" 或 "market.percent10"
+	PairCode string               `json:"pairCode"` // 交易对代码
+	Interval string               `json:"interval,omitempty"` // 聚合步长名称，如 "step0"、"step1"
+	ch       string               // 内部使用的路由键（routing key），不序列化
 }
 
-//生成深度同步版本
+// BuildAndReportDepth 根据订单簿生成全量深度数据，并写入 channel 异步上报。
+// 生成深度同步版本
 func BuildAndReportDepth(book *match.OrderBook) {
 
 	//ts00 := time.Now().UnixNano()
@@ -56,9 +62,11 @@ func BuildAndReportDepth(book *match.OrderBook) {
 	*/
 }
 
-//将生成的过程拆出来，方便做单测
+// buildDepth 从订单簿中取出买卖订单，按配置的多个步长（DepthSteps）分别聚合生成深度数据。
+// 将生成的过程拆出来，方便做单测
 func buildDepth(book *match.OrderBook) []*QuoteDepths {
 
+	// 从订单簿中取出买卖两侧的订单，数量受配置限制
 	buyOrders, sellOrders := takeOrdersFromBookLimit(book, config.GetInt64("exchange.l2quote.size", 1800))
 
 	depthList := make([]*QuoteDepths, len(common.GetSymbolInfo(book.Symbol).DepthSteps))
@@ -69,6 +77,7 @@ func buildDepth(book *match.OrderBook) []*QuoteDepths {
 
 	var taskDone int32 = 0
 
+	// 每个步长启动一个 goroutine 并行聚合，提高深度生成速度
 	for index, depthStep := range steps {
 		go buildDepthStep(index, depthStep, buyOrders, sellOrders, book, depthList, &taskDone, &tsBids, &tsAsks)
 	}
@@ -81,6 +90,8 @@ func buildDepth(book *match.OrderBook) []*QuoteDepths {
 	return depthList
 }
 
+// buildDepthStep 按指定步长（DepthStep）聚合买卖订单，生成一个步长对应的深度数据。
+// 聚合规则：买单价格向下取整到步长倍数，卖单价格向上取整到步长倍数，相同价位的订单量累加。
 func buildDepthStep(index int,
 	depthStep common.DepthStep,
 	buyOrders []*match.Order,
@@ -138,11 +149,17 @@ func buildDepthStep(index int,
 
 }
 
+// BuildAndReportDepthPercent10 生成百分比深度（DepthPercent10）并上报。
+// 百分比深度以盘口中间价为基准，按固定百分比间隔（如 0.1%、0.2% ...）统计各价位的累计挂单量，
+// 常用于交易页面的"深度图"展示。
 func BuildAndReportDepthPercent10(book *match.OrderBook) {
 	quoteDepths := buildDepthPercent10(book)
 	depthChan[book.Symbol] <- quoteDepths
 }
 
+// buildDepthPercent10 构建百分比深度数据。
+// 中间价取买卖盘口最优价的平均值；步长 = 中间价 / (capacity * 10)，
+// 即每个档位代表 0.1% 的价格偏移，共 capacity 个档位（默认 10 档，覆盖 1% 范围）。
 func buildDepthPercent10(book *match.OrderBook) *QuoteDepths {
 	//calculate midPrice
 	var midPrice, step decimal.Decimal
@@ -197,12 +214,16 @@ func buildDepthPercent10(book *match.OrderBook) *QuoteDepths {
 	return quoteDepths
 }
 
+// takeOrdersFromBookLimit 从订单簿中取出买卖两侧的前 limit 条订单。
+// 订单已按价格排序：买单从高到低，卖单从低到高。
 func takeOrdersFromBookLimit(book *match.OrderBook, limit int64) (buyOrders []*match.Order, sellOrders []*match.Order) {
 	buyOrders = book.Take(match.Buy, limit)
 	sellOrders = book.Take(match.Sell, limit)
 	return
 }
 
+// roundUp 将价格向上取整到 step 的整数倍。
+// 用于卖单（asks）聚合，保证同一档位的价格一致。
 func roundUp(d decimal.Decimal, step float64) decimal.Decimal {
 	dStep := decimal.NewFromFloat(step)
 	m := d.Mod(dStep)
@@ -212,11 +233,15 @@ func roundUp(d decimal.Decimal, step float64) decimal.Decimal {
 	return d
 }
 
+// roundDown 将价格向下取整到 step 的整数倍。
+// 用于买单（bids）聚合，保证同一档位的价格一致。
 func roundDown(d decimal.Decimal, step float64) decimal.Decimal {
 	dStep := decimal.NewFromFloat(step)
 	return d.Div(dStep).Truncate(0).Mul(dStep)
 }
 
+// orderDepth 将订单列表按步长聚合成深度档位。
+// 买单向下取整，卖单向上取整，相同档位的订单量累加，最多返回 capacity 个档位。
 func orderDepth(orders []*match.Order, step float64, capacity int64, isSell bool) (depths [][2]decimal.Decimal) {
 
 	var stepPrice decimal.Decimal
@@ -244,6 +269,9 @@ func orderDepth(orders []*match.Order, step float64, capacity int64, isSell bool
 	return
 }
 
+// orderAccumulatedDepth 生成累计深度档位，用于交易页下方的"深度图"。
+// 与 orderDepth 不同，本函数强制生成所有 capacity 个档位（即使某档位挂单量为 0），
+// 且每个档位的 amount 是截止当前价格的所有订单 amount 总和（累计值而非单档值）。
 // 积累深度档, 用于出交易页下方“深度图”
 // amount为截止当前价格的所有订单amount总和
 // 强制生成所有梯度的数据，哪怕为0

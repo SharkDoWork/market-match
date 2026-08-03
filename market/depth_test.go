@@ -8,6 +8,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// TestBuildAndReportDepth 验证 decimal 取模运算和 roundUp 函数的行为。
+// 通过对比 roundUptest（本地参考实现）和 roundUp（生产代码）的结果，确保取整逻辑正确。
 func TestBuildAndReportDepth(t *testing.T) {
 	d, _ := decimal.NewFromString("12.2")
 	d2, _ := decimal.NewFromString("12.2")
@@ -47,6 +49,7 @@ func TestBuildAndReportDepth(t *testing.T) {
 	log.Println(d3)
 }
 
+// roundUptest 是 roundUp 的参考实现，用于测试中对比验证。
 func roundUptest(d decimal.Decimal, step float64) decimal.Decimal {
 	per := decimal.NewFromFloat(step)
 	m := d.Mod(per)
@@ -57,6 +60,8 @@ func roundUptest(d decimal.Decimal, step float64) decimal.Decimal {
 	}
 }
 
+// TestBuildAndReportDepth3 测试 roundDown 和 roundUp 在各种价格和步长组合下的正确性。
+// 覆盖常规小数、大数、不同精度步长等边界情况。
 func TestBuildAndReportDepth3(t *testing.T) {
 	var dataDown = []struct {
 		param  float64
@@ -100,6 +105,8 @@ func TestBuildAndReportDepth3(t *testing.T) {
 	}
 }
 
+// TestBuildAndReportDepth2 测试 buildDepth 对一个小型订单簿的聚合结果。
+// 构造包含重复价格的买卖订单，验证相同价格订单是否正确合并到同一档位。
 func TestBuildAndReportDepth2(t *testing.T) {
 	orderBook := match.InitOrderBook(1, "btcusdt")
 	order1 := testMatchCreateOrderFor(18, 1, match.Sell, match.Limit, match.Submitted, 11.2323, 10)
@@ -124,6 +131,7 @@ func TestBuildAndReportDepth2(t *testing.T) {
 	}
 }
 
+// testMatchCreateOrderFor 快速构造一个测试用的 Order 对象。
 func testMatchCreateOrderFor(seqId int64, orderId int64, buyOrSell match.OrderBuyOrSell,
 	orderType match.OrderType, orderState match.OrderState, price float64, unfilledAmount float64) *match.Order {
 	return &match.Order{

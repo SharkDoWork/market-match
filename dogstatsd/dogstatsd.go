@@ -1,3 +1,9 @@
+// Package dogstatsd 是对 DataDog statsd 客户端的封装，用于上报撮合引擎的
+// 运行指标（Gauge）、事件（Event）与耗时（TimeInMilliseconds）。
+//
+// 注意：当前版本中 DataDog 的实际连接与大部分上报逻辑被整段注释停用
+// （见 Start 中的注释块），仅保留了全局 tag 组装与 Go 运行时内存指标
+// 的日志输出。client 为 nil 时调用 Gauge 会panic，调用方需注意。
 package dogstatsd
 
 import (
@@ -13,8 +19,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-var client *statsd.Client
-var globalTags []string
+var client *statsd.Client // DataDog statsd 客户端（当前初始化代码被注释，实际为 nil）
+var globalTags []string   // 附加到所有指标上的全局标签：app/profile/seq
 
 // var timeReportChan chan *TimeReportObject
 
@@ -24,6 +30,9 @@ var globalTags []string
 // 	tags  []string
 // }
 
+// Start 初始化 dogstatsd 模块：组装全局标签（app 名称、环境 profile、实例序号 seq）。
+// 实际的 statsd 客户端连接代码当前被注释停用，恢复时需取消下方注释块
+// 并配置 datadog.statsd.address。
 func Start() {
 	// 注释datadog beg
 	/**
@@ -48,16 +57,20 @@ func Start() {
 	//metricsReport()
 }
 
+// GaugeBySymbol 上报带 symbol 标签的 Gauge 指标（如某交易对的通道长度、撮合位点）。
 func GaugeBySymbol(name string, value float64, symbol string) {
 	Gauge(name, value, "symbol:"+symbol)
 }
 
+// Gauge 上报一个 Gauge 类型指标，自动附加全局标签，指标名前加 "." 前缀。
+// 注意：client 未初始化（Start 中连接代码被注释）时调用会 panic。
 func Gauge(name string, value float64, tags ...string) error {
 	tags = append(tags, globalTags...)
 	err := client.Gauge("."+name, value, tags, 1)
 	return err
 }
 
+// Event 上报一个 DataDog 事件（如服务崩溃告警）。当前实现被整体注释，为空操作。
 func Event(title, text string, alertType statsd.EventAlertType) {
 	//e := statsd.NewEvent(title, text)
 	//e.AlertType = alertType
@@ -66,6 +79,8 @@ func Event(title, text string, alertType statsd.EventAlertType) {
 	//common.Info("event title:", title, "text:", text)
 }
 
+// TimeInMilliseconds 上报耗时类指标（毫秒）。当前实现被整体注释，为空操作；
+// 原设计是通过带缓冲的 channel 异步上报，通道满时丢弃 30% 旧数据以防阻塞主链路。
 func TimeInMilliseconds(name string, value float64, tags ...string) {
 	// capTR := cap(timeReportChan)
 	// lenTR := len(timeReportChan)
@@ -80,6 +95,8 @@ func TimeInMilliseconds(name string, value float64, tags ...string) {
 	//	client.TimeInMilliseconds(".timecost."+name, value, tags, 1) //注释datadog
 }
 
+// timeReportGo 是耗时指标的异步上报协程（当前整体被注释停用）：
+// 从 timeReportChan 消费耗时记录并调用 statsd 客户端上报。
 func timeReportGo() {
 	// go func() {
 	// 	for {
@@ -90,6 +107,8 @@ func timeReportGo() {
 	// }()
 }
 
+// metricsReport 启动一个每 10 秒触发一次的协程，原计划用于定期采集
+// Go 运行时内存指标（readMemstats 调用当前被注释）。
 func metricsReport() {
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
@@ -102,6 +121,8 @@ func metricsReport() {
 	}()
 }
 
+// readMemstats 读取 Go 运行时内存统计（堆/栈/GC/协程数），
+// 既通过 Gauge 上报到 DataDog，也以日志形式打印一份 STATUS 摘要。
 func readMemstats() {
 	memStat := &runtime.MemStats{}
 	runtime.ReadMemStats(memStat)

@@ -31,8 +31,10 @@ func init() {
 
 }
 
-//生成测试需要用到的OrderBook对象
-//type传入进来，简单的复用一下
+// initOrderBook 生成测试需要用到的 OrderBook 对象。
+// 在盘口中间价 100.0 两侧分别构造买卖订单：卖单在中间价上方按步长递增，买单在中间价下方按步长递减。
+// 每个价格档位内的订单数量等于档位序号（第 1 档 1 笔，第 2 档 2 笔...），便于验证聚合结果。
+// type传入进来，简单的复用一下
 func initOrderBook(orderType match.OrderType, depthStep common.DepthStep) *match.OrderBook {
 	//OrderBook的操作没有完全开放，所以现在外面初始化所有的订单
 	//订单数量 单边数量，总订单数*2
@@ -51,6 +53,7 @@ func initOrderBook(orderType match.OrderType, depthStep common.DepthStep) *match
 	MarketThreadInit(exchangeName, "bchbtc")
 	//init maker order list
 
+	// 构造卖单：从中间价上方一个步长开始，逐档向上，每档订单数递增
 	curPrice = midPrice.Add(decimal.NewFromFloat(depthStep.Accuracy))
 	for i := 1; i <= int(depthStep.Capacity); i++ {
 		for j := 1; j <= i; j++ {
@@ -77,6 +80,7 @@ func initOrderBook(orderType match.OrderType, depthStep common.DepthStep) *match
 		curPrice = curPrice.Add(decimal.NewFromFloat(depthStep.Accuracy))
 	}
 
+	// 构造买单：从中间价下方一个步长开始，逐档向下，每档订单数固定为 Capacity
 	curPrice = midPrice.Sub(decimal.NewFromFloat(depthStep.Accuracy))
 	for i := 1; i <= 10; i++ {
 		for j := 1; j <= int(depthStep.Capacity); j++ {
@@ -108,6 +112,8 @@ func initOrderBook(orderType match.OrderType, depthStep common.DepthStep) *match
 
 }
 
+// TestBuildDepth 测试不同步长下的深度聚合结果。
+// 验证卖盘各档位的挂单量是否与构造的订单数量一致（第 i 档应有 i 笔订单，每笔 1.0）。
 func TestBuildDepth(t *testing.T) {
 	od := initOrderBook(match.Market, common.DepthStep{Accuracy: 0.1, Capacity: 20})
 

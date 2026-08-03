@@ -1,3 +1,4 @@
+// Package validate 测试文件：包含订单簿校验及撮合结果比对（ResultEqual）相关功能的测试用例。
 package validate
 
 import (
@@ -7,10 +8,13 @@ import (
 	"testing"
 )
 
+// TestValidateOrderbook 测试订单簿校验入口（当前为空实现，占位）。
 func TestValidateOrderbook(t *testing.T) {
 	//  testValidateMatchResult()
 }
 
+// TestValidateOrderbook2 构造两条内容相同但内存地址不同的 MatchResult，
+// 验证 match.ResultEqual 能正确判断它们相等（基于值而非指针）。
 func TestValidateOrderbook2(t *testing.T) {
 	matchResult := &match.MatchResult{
 		Id:           1,
@@ -66,6 +70,8 @@ func TestValidateOrderbook2(t *testing.T) {
 
 }
 
+// TestValidateOrderbook3 使用高精度 decimal 价格构造两条 MatchResult，
+// 验证 ResultEqual 在高精度小数场景下的比对正确性。
 func TestValidateOrderbook3(t *testing.T) {
 	price, err := decimal.NewFromString("23.233333333333333333333999999999")
 	if err != nil {

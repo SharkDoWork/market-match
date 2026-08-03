@@ -1,3 +1,18 @@
+// Package l2quote L2 行情模块主文件。
+// 本模块负责接收撮合引擎（match）产生的撮合结果（MatchResult），
+// 基于成交数据实时生成并维护各类行情数据：
+//   - 多周期 K 线（1min/5min/15min/30min/60min/4hour/1day/1week/1mon）
+//   - 24 小时滚动汇总行情（market detail）
+//   - 实时 ticker（最新价、买一卖一、涨跌幅等）
+//   - 成交流水（trade detail）
+//
+// 生成的行情数据一方面缓存到 Redis 供查询服务读取，
+// 另一方面通过 RabbitMQ 推送给下游订阅者（如行情推送网关）。
+// 同时模块支持定时打快照（snapshot）到本地磁盘并上传 S3，
+// 以便重启后能快速恢复内存中的行情状态，避免全量重放撮合结果。
+//
+// 本文件定义了模块的核心数据结构（Quotation、L2quote）、
+// K 线周期常量，以及主运行循环 Run()。
 package l2quote
 
 import (
@@ -22,6 +37,8 @@ import (
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var (
+	// KLINETYPES 本模块支持的所有 K 线周期名称列表。
+	// 每种周期都会有一个独立的 klineUpdater 协程负责维护。
 	KLINETYPES = []string{"1min",
 		"5min",
 		"15min",
@@ -32,6 +49,8 @@ var (
 		"1week",
 		"1mon"}
 
+	// KLINE_NAME_TYPE_MAP K 线周期名称到内部整型编号的映射，
+	// 用于 redisCache 等以 int 为下标的场景。
 	KLINE_NAME_TYPE_MAP = map[string]int{"1min": Type1min,
 		"5min":  Type5min,
 		"15min": Type15min,
@@ -42,6 +61,7 @@ var (
 		"1week": Type1week,
 		"1mon":  Type1mon}
 
+	// KLINE_TYPE_TO_NAME_MAP 内部整型编号到 K 线周期名称的反向映射。
 	KLINE_TYPE_TO_NAME_MAP = map[int]string{Type1min: "1min",
 		Type5min:  "5min",
 		Type15min: "15min",
@@ -53,6 +73,7 @@ var (
 		Type1mon:  "1mon"}
 )
 
+// 各 K 线周期的内部整型编号，与 KLINETYPES 的顺序一一对应。
 var (
 	Type1min  = 0
 	Type5min  = 1
@@ -66,6 +87,7 @@ var (
 )
 
 const (
+	// CONTUSD_DEFAULT 合约面值默认值（当前代码中未实际使用，保留作默认配置）。
 	CONTUSD_DEFAULT int64 = 100
 )
 
@@ -89,6 +111,11 @@ type Quotation struct {
 	lastSnapshotTime int
 }
 
+// L2quote 单个交易对的 L2 行情计算实例。
+// 每个交易对（symbol）会创建一个 L2quote 实例，
+// 内部持有该交易对全部行情状态（Quotation）、
+// 与外部交互的句柄（redis、mq、撮合结果 channel），
+// 以及各类配置参数。
 type L2quote struct {
 	symbol                string        // 交易对名称, 初始化时传入
 	redisClient           *redis.Client // redisClient连接实例，初始化时传入
@@ -112,6 +139,18 @@ type L2quote struct {
 	ctx              context.Context
 }
 
+// NewL2quote 创建一个交易对的 L2 行情实例。
+// 参数说明：
+//   - symbol: 交易对名称，如 "BTC_USDT"
+//   - client: redis 客户端，用于读写 K 线缓存
+//   - matchResultChan: 上游撮合引擎推送撮合结果的 channel（序列化后的字节流）
+//   - snapshotPath: 本地快照文件存储目录
+//   - mqExchangeName: RabbitMQ exchange 名称
+//   - mqSendIntervalMS: 向 MQ 批量发送行情的时间间隔（毫秒），用于节流
+//   - klineForwardLimit: 旧撮合结果向前重绘 K 线时的最大迭代窗口数
+//   - mqBatchSize: MQ 批量发送时每包最多打包的消息条数
+//   - snapshotMaxHistoryNum: 本地保留的快照文件最大数量
+//   - makeNewKlineAtSec: 每分钟第几秒之后才允许创建新 K 线（避开整分钟边界抖动）
 func NewL2quote(symbol string, client *redis.Client, matchResultChan chan []byte, snapshotPath string,
 	mqExchangeName string, mqSendIntervalMS int64, klineForwardLimit int64, mqBatchSize int,
 	snapshotMaxHistoryNum int64, makeNewKlineAtSec int) *L2quote {
@@ -122,6 +161,13 @@ func NewL2quote(symbol string, client *redis.Client, matchResultChan chan []byte
 		snapshotMaxHistoryNum: snapshotMaxHistoryNum, makeNewKlineAtSec: makeNewKlineAtSec, ctx: context.Background()}
 }
 
+// Init 初始化行情实例：
+//  1. 校验 redis 中历史 K 线数据的完整性（checkRedisKline）
+//  2. 从本地快照恢复内存行情状态，无快照则从零初始化（initKlineFromSnapshots）
+//  3. 初始化 redis 写缓存（redisCache，按 K 线周期分桶）
+//  4. 创建 MQ 发送队列
+//
+// 返回值：恢复后的最大撮合结果 ID（MaxMRId），供上游决定从哪条撮合结果开始重放。
 func (L *L2quote) Init() int64 {
 	L.checkRedisKline()
 	L.initKlineFromSnapshots()
@@ -135,11 +181,19 @@ func (L *L2quote) Init() int64 {
 	return L.quotation.MaxMRId
 }
 
-/*
-1. snapshot
-2. save kline to redis
-3. send match results -> l2quote
-*/
+// Run 启动行情计算主循环，是整个模块的核心调度入口。
+// 工作流程：
+//  1. 启动 9 个 klineUpdater 协程（每种 K 线周期一个）、1 个 market 协程（24h 汇总）、
+//     1 个 trade 协程（成交流水）、1 个 sendToMQ 协程（批量发送 MQ）。
+//  2. 主循环通过 select 监听多路事件：
+//     - mrChan: 接收上游撮合结果，反序列化后分发给各计算协程，并用 WaitGroup 等待全部处理完，
+//       保证同一时刻内存状态一致，便于打快照。
+//     - "snapshot!" 控制消息: 先把 K 线落 Redis（保证快照与 Redis 数据一致），再执行 takeSnapShot。
+//     - 各类定时 ticker: 定时发送 K 线/行情到 MQ、定时落 Redis、定时建新 K 线、
+//       定时清理内存中过期的 K 线、定时上报监控指标。
+//
+// 注意：分发采用"扇出 + WaitGroup"模式，每条撮合结果会被 11 个计算单元并行处理，
+// 全部完成后才更新 MaxMRId/MaxMRTS，因此快照时刻的内存状态是某一撮合结果边界上的一致性视图。
 func (L *L2quote) Run() {
 	// ticker 初始化
 	redisSaveTicker := time.NewTicker(time.Second * 1)
@@ -309,9 +363,10 @@ func (L *L2quote) Run() {
 	}
 }
 
-/*
-判断是否是挂单
-*/
+// isPendingOrder 判断一条撮合结果是否为"纯挂单"（即没有产生成交）。
+// 判定逻辑：撮合结果的 Items 只有 1 条（仅 taker 自身，未匹配到任何 maker），
+// 或成交价为 0，都视为未成交的挂单。
+// 挂单不产生 K 线/行情更新，各计算协程收到后会直接忽略。
 func isPendingOrder(mr *match.MatchResult) bool {
 	if len(mr.Items) == 1 || mr.Price.Equal(decimal.Zero) {
 		return true

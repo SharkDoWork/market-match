@@ -1,3 +1,16 @@
+// Package l2quote 本文件实现 K 线数据到 Redis 的持久化缓存。
+// Redis 缓存键设计：
+//   - K 线按周期分桶存储为 Redis List，键格式：
+//     market.{symbol}.kline.{klineType}.{tableTS}
+//     其中 tableTS 为该分桶（按年/全量）的起始时间戳，由 common.GetListTsOffLen 计算；
+//     List 内每个元素是一根 K 线的紧凑字符串："ts,open,close,low,high,vol,turnOver,count"，
+//     通过 LSet 按 offset 原地更新（K 线是原地重绘的，位置不变、内容会变）。
+//   - market.{symbol}.maxMRID 记录已落 Redis 的最大撮合结果 ID，
+//     用于与内存进度比对：若 Redis 进度更新（如另一实例已写入），则跳过本次写入，
+//     保证快照与 Redis 数据的一致性（快照要求 Redis 只多不少）。
+// 写入采用"脏标记缓存 + 定时批量落盘"模式：
+//   内存中 redisCache 记录哪些 K 线被修改过，每秒由 ticker 触发统一 Pipeline 写入，
+//   避免每条撮合结果都直接写 Redis 造成 IO 放大。
 package l2quote
 
 import (
@@ -85,6 +98,8 @@ func (L *L2quote) klineToRedisFormat(k *kline, klineType string) (string, int64,
 	return key, int64(offset), msg
 }
 
+// getMaxMRIDFromRedis 读取 Redis 中记录的该交易对已落盘的最大撮合结果 ID。
+// 键不存在时返回 0（视为从头开始），其他错误原样返回。
 func (L *L2quote) getMaxMRIDFromRedis() (int64, error) {
 	maxMRID, err := L.redisClient.Get(L.ctx, genRedisMaxMRIDKey(L.symbol)).Int64()
 
@@ -100,6 +115,7 @@ func (L *L2quote) getMaxMRIDFromRedis() (int64, error) {
 	return maxMRID, nil
 }
 
+// genRedisMaxMRIDKey 生成记录某交易对最大撮合结果 ID 的 Redis 键。
 func genRedisMaxMRIDKey(symbol string) string {
 	return fmt.Sprintf("market.%s.maxMRID", symbol)
 }

@@ -17,12 +17,14 @@ import (
 	"testing"
 )
 
+// ExampleMinGap 演示 MinGap 的用法，验证配置读取是否正常。
 func ExampleMinGap() {
 	if MinGap() <= 0 {
 		log.Println(MinGap())
 	}
 }
 
+// ExampleUploadToS32 演示 S3 分页列举对象的用法（已禁用，仅作参考）。
 func ExampleUploadToS32() {
 	return
 	svc := s3.New(session.Must(session.NewSession()))
@@ -55,11 +57,13 @@ func ExampleUploadToS32() {
 	}
 }
 
+// ExampleGetS3SnapshotKey2 演示 GetS3SnapshotKey 的用法。
 func ExampleGetS3SnapshotKey2() {
 	key1, key2 := GetS3SnapshotKey("uceth", 1)
 	log.Println("key1 key2", key1, key2)
 }
 
+// ExampleDumpSnapshot 演示完整的快照保存流程：构造订单簿 -> 添加随机订单 -> 序列化保存。
 func ExampleDumpSnapshot() {
 	decimal.MarshalJSONWithoutQuotes = true
 	viper.Set("aws.s3.enable", false)
@@ -71,6 +75,7 @@ func ExampleDumpSnapshot() {
 	dump(book, name)
 }
 
+// ExampleTestLoad 演示快照保存后加载的流程（加载部分被注释掉，仅演示保存）。
 func ExampleTestLoad() {
 	decimal.MarshalJSONWithoutQuotes = true
 	book := match.InitOrderBook(26, "btceth")
@@ -85,6 +90,7 @@ func ExampleTestLoad() {
 	//}
 }
 
+// BenchmarkDumpSnapshot 基准测试快照序列化保存的性能。
 func BenchmarkDumpSnapshot(b *testing.B) {
 	decimal.MarshalJSONWithoutQuotes = true
 	book := match.InitOrderBook(26, "btceth")
@@ -98,6 +104,8 @@ func BenchmarkDumpSnapshot(b *testing.B) {
 	b.StopTimer()
 }
 
+// addRandomOrder 向订单簿中添加指定数量的随机买卖订单，用于测试。
+// 每轮循环添加一笔买单和一笔卖单，价格、数量、费率等均为随机值。
 func addRandomOrder(book *match.OrderBook, num int) {
 	var t int64
 	t = 0
@@ -131,10 +139,12 @@ func addRandomOrder(book *match.OrderBook, num int) {
 	}
 }
 
+// ExampleGetSnapshotIds 演示 GetSnapshotIds 的用法。
 func ExampleGetSnapshotIds() {
 	GetSnapshotIds("btcusdt")
 }
 
+// ExampleS3 演示 S3 文件上传的基本用法。
 func ExampleS3() {
 	//common.LogInit(common.LogLevel)
 	common.LoadConfigViper()
@@ -162,6 +172,7 @@ func ExampleS3() {
 	}
 }
 
+// ExampleGetSnapsName 演示如何列举 S3 上指定前缀的所有快照对象。
 func ExampleGetSnapsName() {
 
 	common.LoadConfigViper()

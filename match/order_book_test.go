@@ -1,3 +1,7 @@
+// order_book_test.go 订单簿（order_book.go）的单元测试：
+// 覆盖挂单（Enqueue）、摘单（Dequeue）、按 ID 查找（Find）、队首查询（Peek）、
+// 批量取单（Take）、缓存索引、订单簿比较（CompareOrderBook）与深拷贝（Clone）的正确性，
+// 并包含一个万级订单规模下 Clone 耗时的性能测试。
 package match
 
 import (
@@ -6,8 +10,10 @@ import (
 	"time"
 )
 
+// orderId 测试用的全局递增订单 ID，保证同一测试进程内 ID 不重复。
 var orderId int64
 
+// RandomOrder 测试辅助函数：构造一个仅含序号/ID/类型/方向的简单订单。
 func RandomOrder(orderType OrderType, buyOrSell OrderBuyOrSell) *Order {
 	orderId++
 	return &Order{
@@ -158,6 +164,7 @@ func TestOrderBook_Clone(t *testing.T) {
 	}
 }
 
+// TestOrderBook_Clone2 性能测试：2 万笔在簿订单规模下测量 Clone 的耗时（毫秒级输出）。
 func TestOrderBook_Clone2(t *testing.T) {
 	orderBook := InitOrderBook(1, "test")
 	for i := 0; i < 10000; i++ {

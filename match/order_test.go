@@ -1,3 +1,6 @@
+// order_test.go 订单模型（order.go）的单元测试：
+// 覆盖订单字符串输出、状态设置、组合类型字符串、红黑树比较器（Comparator）
+// 的排序规则（买单价格降序/卖单价格升序/同价 SeqId 优先）以及订单相等性比较。
 package match
 
 import (
@@ -100,6 +103,8 @@ func TestOrder_OrderCombineTypeStr(t *testing.T) {
 	}
 }
 
+// TestComparator 验证订单簿排序比较器的核心撮合优先级规则：
+// 买单价格高者优先、卖单价格低者优先、同价时 SeqId 小（先到）者优先。
 func TestComparator(t *testing.T) {
 	var test = []struct {
 		order1 *Order
@@ -195,6 +200,7 @@ func TestCompareOrder(t *testing.T) {
 
 }
 
+// testCreateOrder 测试辅助函数：快速构造一个带默认熔断比例（0.1）的订单。
 func testCreateOrder(seqId int64, orderId int64, buyOrSell OrderBuyOrSell,
 	orderType OrderType, price float64, amount float64) *Order {
 	return &Order{

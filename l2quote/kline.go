@@ -1,3 +1,12 @@
+// Package l2quote 本文件实现多周期 K 线（OHLCV）的实时聚合逻辑。
+// 核心概念：
+//   - K 线（蜡烛图）：一个时间窗口内的开盘价(Open)、最高价(High)、最低价(Low)、
+//     收盘价(Close)、成交量(Vol)、成交额(TurnOver)、成交笔数(Count)。
+//   - 每种周期（1min/5min/.../1mon）由独立的 klineUpdater 协程维护，
+//     存储在按时间戳排序的 treemap 中，方便按窗口查找与补齐。
+//   - 当收到"旧"撮合结果（重放/补数据场景）时，会从该结果所在窗口开始，
+//     用其成交价向前（向最新方向）重绘后续窗口的 K 线，直到当前窗口，
+//     重绘深度受 klineForwardLimit 限制，防止长时间重放拖垮系统。
 package l2quote
 
 import (
@@ -12,6 +21,9 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// QuoteKline 发送到下游（MQ）的 K 线消息封装格式。
+// Type 固定为 "market.candles"，Interval 为周期名（如 "1min"），
+// Candle 为 K 线本体，TS/SeqId 用于下游排序与去重。
 type QuoteKline struct {
 	Type     string `json:"type"`
 	PairCode string `json:"pairCode"`
@@ -21,6 +33,10 @@ type QuoteKline struct {
 	SeqId    int64  `json:"SeqId"`
 }
 
+// kline 单根 K 线（蜡烛）数据结构，即 OHLCV 聚合结果。
+// TS 为该 K 线所在时间窗口的起始时间戳（秒），SeqId 为最后更新它的撮合结果 ID。
+// 该结构同时用于：内存存储、24h 汇总（market detail 的每个分钟桶）、
+// 以及序列化后作为 MQ 消息与 Redis 缓存的内容。
 type kline struct {
 	TS         int64           `json:"id"`
 	SeqId      int64           `json:"seqId"`
@@ -61,6 +77,8 @@ func (L *L2quote) klineUpdater(mrCh chan *match.MatchResult, klineType string, w
 	}
 }
 
+// stateIsFilled 判断撮合条目的状态是否表示"已成交"（完全成交或部分成交）。
+// 只有已成交的条目才参与 K 线/行情的价格与成交量聚合。
 func stateIsFilled(state string) bool {
 	if state == "filled" || state == "partial-filled" {
 		return true
@@ -69,6 +87,9 @@ func stateIsFilled(state string) bool {
 	return false
 }
 
+// getStartPrice 从撮合结果中取出第一笔有效成交价，
+// 用作新 K 线的开盘/最高/最低初始价。
+// 若所有条目都未成交则返回 nil（调用方会跳过本次更新）。
 func getStartPrice(mr *match.MatchResult) *decimal.Decimal {
 	for i := range mr.Items {
 		if mr.Items[i].Price != nil && stateIsFilled(mr.Items[i].State) {

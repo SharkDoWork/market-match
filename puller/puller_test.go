@@ -1,5 +1,9 @@
 package puller
 
+// 本文件中的测试/示例代码当前全部被注释停用。
+// 保留内容展示了 puller 的典型用法：初始化数据库连接后通过 GoPuller
+// 按 id 游标持续拉取订单，以及 ExistSymbolInDb / GetMinIdFromDb 等
+// 辅助查询函数的调用方式。启用前需先准备好配置与数据库环境。
 //
 //func ExampleGoPuller() {
 //	Init()

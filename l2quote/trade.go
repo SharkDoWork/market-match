@@ -1,3 +1,8 @@
+// Package l2quote 本文件实现成交流水（trade detail）的生成与下发。
+// 撮合引擎每产生一笔成交（taker 与若干 maker 的匹配），
+// 本模块将其转换为下游行情订阅方需要的"逐笔成交"消息格式（market.fills），
+// 包含每笔成交的价格、数量、方向（买/卖）与时间戳，
+// 通过 MQ 发送队列批量推送给下游。
 package l2quote
 
 import (
@@ -9,6 +14,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// TradeDetailData 单笔成交流水记录。
+// Direction 表示 taker 方向（"buy" 或 "sell"），Id 由撮合结果 ID*10000+条目序号 生成，保证全局唯一。
 type TradeDetailData struct {
 	//Amount    decimal.Decimal `json:"amount"`
 	Vol       decimal.Decimal `json:"vol"`
@@ -18,6 +25,8 @@ type TradeDetailData struct {
 	Direction string          `json:"direction"`
 }
 
+// TradeDetail 发送到下游的成交流水消息包，Type 固定为 "market.fills"。
+// 一条撮合结果可能对应多笔 maker 成交，Data 为逐笔成交列表。
 type TradeDetail struct {
 	Id       int64             `json:"id"` //seq-id of match result
 	Ts       int64             `json:"ts"`

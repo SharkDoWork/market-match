@@ -1,3 +1,8 @@
+// matcher_test.go 撮合逻辑（matcher.go）的单元测试与示例：
+// 覆盖价格可成交判定（matchAble）、单笔成交结果（matchOrder）、限价单完整撮合流程
+// （全部成交/部分成交/挂单）、市价单撮合（含熔断保护）、FOK/IOC/LimitMaker 等
+// 各类订单类型的撮合行为，以及撮合结果的 JSON 序列化与等价性比较。
+// 其中 Example 开头的函数为演示用例，打印撮合结果供人工观察。
 package match
 
 import (
@@ -8,6 +13,7 @@ import (
 	"unsafe"
 )
 
+// testMatchCreateOrderFor 测试辅助函数：构造一个不带熔断保护（CircuitRate=0）的订单。
 func testMatchCreateOrderFor(seqId int64, orderId int64, buyOrSell OrderBuyOrSell,
 	orderType OrderType, orderState OrderState, price float64, unfilledAmount float64) *Order {
 	return &Order{
@@ -23,6 +29,8 @@ func testMatchCreateOrderFor(seqId int64, orderId int64, buyOrSell OrderBuyOrSel
 	}
 }
 
+// testCreateOrderWithCircuitRate 测试辅助函数：构造一个带指定熔断保护比例的订单，
+// 用于测试市价单触发熔断撤销（CircuitCanceled）的场景。
 func testCreateOrderWithCircuitRate(seqId int64, orderId int64, buyOrSell OrderBuyOrSell,
 	orderType OrderType, orderState OrderState, price float64, unfilledAmount float64, circuitRate float64) *Order {
 	return &Order{
@@ -38,11 +46,18 @@ func testCreateOrderWithCircuitRate(seqId int64, orderId int64, buyOrSell OrderB
 	}
 }
 
+// NewDecimal 测试辅助函数：由 float64 构造 decimal.Decimal 并返回其指针，
+// 方便填充 OrderResult 中的 *decimal.Decimal 字段。
 func NewDecimal(f float64) *decimal.Decimal {
 	d := decimal.NewFromFloat(f)
 	return &d
 }
 
+// TestMatchOrder 验证两个层面：
+//  1. matchAble 价格可成交判定：买单出价 >= 卖价、卖单要价 <= 买价时可成交，
+//     含价格精度边界（差 1e-9 也不可成交）的用例；
+//  2. matchOrder 单笔成交结果：成交量取双方较小值、成交价以 maker 价格为准、
+//     maker 状态按剩余量映射为 filled/partial-filled。
 func TestMatchOrder(t *testing.T) {
 	var testMatchAble = []struct {
 		order1 *Order
@@ -197,6 +212,10 @@ func testMatchFilled() {
 	log.Println("results:", string(b1))
 }
 
+// TestOrderBook_GenMatchResult 验证限价单完整撮合流程：
+// 第一笔买单无人可成交 -> 挂入订单簿（taker 结果状态 submitted）；
+// 第二笔同价卖单进入 -> 与簿中买单成交，产生一条 maker（filled）结果
+// 和一条 taker（filled）结果，最后成交价为 maker 价格。
 func TestOrderBook_GenMatchResult(t *testing.T) {
 	order1 := testMatchCreateOrderFor(1, 2, Buy, Limit, Submitted, 24, 200)
 	order1.CreateAt = 1523328694262
@@ -349,6 +368,9 @@ func ExampleMatchMarket() {
 	log.Println("results:", string(b4))
 }
 
+// TestOrderBook_GenMatchResult2 验证市价卖单连续吃掉多档买单的撮合：
+// 先在买卖两侧各挂三档限价单，再进入一笔带熔断比例（0.1）的市价卖单，
+// 预期按买一、买二顺序逐档成交，剩余数量因深度不足或熔断保护以撤销类状态结束。
 func TestOrderBook_GenMatchResult2(t *testing.T) {
 	order1 := testMatchCreateOrderFor(1, 2, Buy, Limit, Submitted, 24.334, 200)
 	order2 := testMatchCreateOrderFor(2, 3, Buy, Limit, Submitted, 23.334, 540)
@@ -420,6 +442,8 @@ func ExampleMatchMarketBuyFloat() {
 	log.Println("results:", string(b4))
 }
 
+// TestOrderBook_Match2 综合场景测试：在同一订单簿上连续进入限价、FOK、IOC 等多种
+// 类型订单，观察各类型订单的撮合/撤销行为（结果打印到日志，人工核对）。
 func TestOrderBook_Match2(t *testing.T) {
 	order1 := testMatchCreateOrderFor(1, 2, Sell, Limit, Submitted, 90.334, 200.2)
 	order2 := testMatchCreateOrderFor(2, 3, Sell, Fok, Submitted, 90.234, 540.3)
@@ -474,6 +498,8 @@ func TestOrderBook_Match2(t *testing.T) {
 	log.Println("results:", string(b9))
 }
 
+// TestOrderBook_Match_LimitMaker 验证只做 Maker（Post-Only）订单的行为：
+// 价格不可成交时正常挂簿；价格会立即成交时被拒绝（撤销），保证其只做 maker。
 func TestOrderBook_Match_LimitMaker(t *testing.T) {
 	book := InitOrderBook(0, "ethbtc")
 	order1 := testMatchCreateOrderFor(1, 1, Sell, Limit, Submitted, 9.1, 232)
@@ -508,6 +534,9 @@ func TestOrderBook_Match_LimitMaker(t *testing.T) {
 
 }
 
+// TestOrderBook_GenMatchResult7 验证市价买单按金额撮合的场景：
+// 先挂一笔限价卖单，再进入一笔市价买单（UnfilledAmount 表示金额），
+// 观察按金额换算数量后的成交结果。
 func TestOrderBook_GenMatchResult7(t *testing.T) {
 	order1 := testMatchCreateOrderFor(1, 2, Sell, Limit, Submitted, 25.29, 1)
 	order2 := testMatchCreateOrderFor(2, 3, Buy, Market, Submitted, 423.33, 0.4615)
